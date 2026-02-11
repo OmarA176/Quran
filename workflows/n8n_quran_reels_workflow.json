@@ -1,0 +1,378 @@
+{
+  "name": "Quran Reels Auto Publisher",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyDay",
+              "hour": 9,
+              "minute": 0
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "daily_trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const ayahNumber = Math.floor(Math.random() * 6236) + 1;\nreturn [{ ayahNumber: ayahNumber, imageUrl: 'https://picsum.photos/1080/1920?random=' + Date.now(), telegramChatId: $env.TELEGRAM_CHAT_ID, telegramBotToken: $env.TELEGRAM_BOT_TOKEN }];"
+      },
+      "id": "2",
+      "name": "prepare_inputs",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.alquran.cloud/v1/ayah/{{$json.ayahNumber}}/editions/quran-uthmani,ar.alafasy",
+        "options": {}
+      },
+      "id": "3",
+      "name": "get_ayah_audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const arabic = $json.data[0].text;\nconst reciter = $json.data[1].edition.englishName;\nconst audioUrl = $json.data[1].audio;\nconst safeText = arabic.replace(/'/g, \"\\'\");\nconst inputs = $item(0).$node.prepare_inputs.json;\nreturn [{ ayahText: arabic, safeAyahText: safeText, audioUrl: audioUrl, imageUrl: inputs.imageUrl, telegramChatId: inputs.telegramChatId, telegramBotToken: inputs.telegramBotToken, title: 'آية اليوم - ' + inputs.ayahNumber, description: arabic + '\\n\\nReciter: ' + reciter + '\\n#quran #islam #shorts' }];"
+      },
+      "id": "4",
+      "name": "prepare_metadata",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        890,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.imageUrl}}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "5",
+      "name": "download_image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1130,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.audioUrl}}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "6",
+      "name": "download_audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1130,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine"
+      },
+      "id": "7",
+      "name": "merge_media",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fileName": "/tmp/quran-input/image.jpg",
+        "dataPropertyName": "data"
+      },
+      "id": "8",
+      "name": "write_image",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        1590,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "fileName": "/tmp/quran-input/audio.mp3",
+        "dataPropertyName": "data_1"
+      },
+      "id": "9",
+      "name": "write_audio",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        1590,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "command": "mkdir -p /tmp/quran-output && /workspace/Quran/scripts/generate_quran_reel.sh /tmp/quran-input/image.jpg /tmp/quran-input/audio.mp3 '{{$json.safeAyahText}}' /tmp/quran-output/video.mp4"
+      },
+      "id": "10",
+      "name": "render_video",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1830,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "filePath": "/tmp/quran-output/video.mp4"
+      },
+      "id": "11",
+      "name": "read_video",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        2050,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/bot{{$json.telegramBotToken}}/sendVideo",
+        "sendBinaryData": true,
+        "binaryPropertyName": "data",
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "chat_id",
+              "value": "={{$json.telegramChatId}}"
+            },
+            {
+              "name": "caption",
+              "value": "={{$item(0).$node.prepare_metadata.json.title}}"
+            }
+          ]
+        }
+      },
+      "id": "12",
+      "name": "send_telegram_first",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2270,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "/workspace/Quran/scripts/upload_youtube.sh /tmp/quran-output/video.mp4 '{{$item(0).$node.prepare_metadata.json.title}}' '{{$item(0).$node.prepare_metadata.json.description}}'"
+      },
+      "id": "13",
+      "name": "upload_youtube",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2490,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "command": "/workspace/Quran/scripts/upload_tiktok.sh '{{$env.PUBLIC_VIDEO_URL}}' '{{$item(0).$node.prepare_metadata.json.title}}' 'PUBLIC_TO_EVERYONE'"
+      },
+      "id": "14",
+      "name": "upload_tiktok",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2490,
+        380
+      ]
+    }
+  ],
+  "connections": {
+    "daily_trigger": {
+      "main": [
+        [
+          {
+            "node": "prepare_inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepare_inputs": {
+      "main": [
+        [
+          {
+            "node": "get_ayah_audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_ayah_audio": {
+      "main": [
+        [
+          {
+            "node": "prepare_metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepare_metadata": {
+      "main": [
+        [
+          {
+            "node": "download_image",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "download_audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "download_image": {
+      "main": [
+        [
+          {
+            "node": "merge_media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "download_audio": {
+      "main": [
+        [
+          {
+            "node": "merge_media",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "merge_media": {
+      "main": [
+        [
+          {
+            "node": "write_image",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "write_audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "write_image": {
+      "main": [
+        [
+          {
+            "node": "render_video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "write_audio": {
+      "main": [
+        [
+          {
+            "node": "render_video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "render_video": {
+      "main": [
+        [
+          {
+            "node": "read_video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "read_video": {
+      "main": [
+        [
+          {
+            "node": "send_telegram_first",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send_telegram_first": {
+      "main": [
+        [
+          {
+            "node": "upload_youtube",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "upload_tiktok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
